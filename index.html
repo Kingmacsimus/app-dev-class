@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>My App Dev Project</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; line-height: 1.6; }
+    header { max-width: 800px; margin: 0 auto; }
+    h1 { margin-bottom: .25rem; }
+    .tagline { color: #555; margin-top: 0; }
+    main { max-width: 800px; margin: 2rem auto; }
+    ul { padding-left: 1.25rem; }
+    footer { max-width: 800px; margin: 3rem auto; font-size: .9rem; color: #666; }
+    a { text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>👋 Hi, I’m <span id="name">Mac</span></h1>
+    <p class="tagline">App Development Class • Project Site</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>About Me</h2>
+      <p>
+        I’m a student in the app development class. My background includes
+        <em> minimal coding experience</em> and I’m interested in
+        <em> the use of AI with coding</em>. This site will collect my class work and related projects.
+      </p>
+    </section>
+
+    <section>
+      <h2>Projects &amp; Future Work</h2>
+      <ul>
+        <!-- Add <li><a href="...">Project name</a></li> items as you build -->
+      </ul>
+      <p><em>Stay tuned — links will appear here as I publish projects.</em></p>
+    </section>
+  </main>
+
+  <footer>
+    <p>© <span id="year"></span> Mac • <a href="https://github.com/your-username">GitHub</a></p>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
