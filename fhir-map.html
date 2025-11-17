@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FHIR Locations Map</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+    integrity="sha256-kLaT2GOSpHechhsozzB+flnD+zUyjE2LlfWPgU04xyI="
+    crossorigin=""
+  />
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"
+    integrity="sha256-WBkoXOwTeyKclOHuWtc+i2uENFpDZ9YPdf5Hf+D7ewM="
+    crossorigin=""
+  ></script>
+
+  <!-- FHIR client -->
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 2rem;
+      line-height: 1.6;
+    }
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+    .note {
+      font-size: 0.9rem;
+      color: #555;
+    }
+    #status {
+      font-size: 0.9rem;
+      color: #333;
+      margin-top: 0.5rem;
+    }
+    #error {
+      font-size: 0.9rem;
+      color: #b00020;
+      margin-top: 0.25rem;
+    }
+    /* We MUST define a height or the map will be 0px tall and not appear */
+    #map {
+      height: 400px;
+      margin-top: 1rem;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>FHIR Locations Map</h1>
+  <p class="note">
+    This map uses the mock FHIR server at <code>https://r3.smarthealthit.org</code>.<br />
+    It loads <strong>Location</strong> resources that have latitude/longitude and displays them as markers.
+    Hover for a tooltip, click for more details.
+  </p>
+
+  <p id="status"></p>
+  <p id="error"></p>
+
+  <div id="map"></div>
+
+  <script>
+    // --- helpers ---
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg || "";
+    }
+    function setError(msg) {
+      document.getElementById("error").textContent = msg || "";
+    }
+    function safe(fn, fallback = "") {
+      try {
+        const v = fn();
+        return v == null ? fallback : v;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    // --- Initialize Leaflet map (based on your professor's example) ---
+    var map = L.map("map");
+    // Rough center over the US; we'll adjust to fit markers later
+    map.setView([40, -95], 4);
+
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18
+    }).addTo(map);
+
+    // --- FHIR client setup ---
+    const client = FHIR.client("https://r3.smarthealthit.org");
+
+    // Load Location resources and add markers
+    function loadLocations() {
+      setStatus("Loading locations from FHIR server…");
+      setError("");
+
+      // Basic query: grab up to 100 Location resources.
+      // Many may NOT have coordinates; we'll filter those out.
+      client
+        .request("Location?_count=100")
+        .then(function (bundle) {
+          const entries = bundle.entry || [];
+          const markers = [];
+          let countWithCoords = 0;
+
+          entries.forEach(function (e) {
+            const loc = e.resource;
+            const lat = safe(() => loc.position.latitude, null);
+            const lng = safe(() => loc.position.longitude, null);
+
+            if (lat == null || lng == null) {
+              return; // skip locations without coordinates
+            }
+
+            countWithCoords++;
+
+            const name = loc.name || "Unnamed Location";
+
+            // Build a friendly address string if present
+            const addr = loc.address || {};
+            const line = (addr.line || []).join(", ");
+            const city = addr.city || "";
+            const state = addr.state || "";
+            const postal = addr.postalCode || "";
+            const country = addr.country || "";
+            const addressParts = [line, city, state, postal, country]
+              .filter(Boolean)
+              .join(", ");
+
+            // Type string (optional)
+            const typeText =
+              safe(() => loc.type.text,
+                safe(() => loc.type.coding[0].display, "")
+              ) || "";
+
+            // Create marker
+            const marker = L.marker([lat, lng]).addTo(map);
+            markers.push(marker);
+
+            // Tooltip on hover (name only)
+            marker.bindTooltip(name);
+
+            // Popup on click – name, type, address, coordinates
+            const popupDiv = document.createElement("div");
+
+            const title = document.createElement("strong");
+            title.textContent = name;
+            popupDiv.appendChild(title);
+
+            if (typeText) {
+              const typeP = document.createElement("p");
+              typeP.style.margin = "0.25rem 0";
+              typeP.textContent = "Type: " + typeText;
+              popupDiv.appendChild(typeP);
+            }
+
+            if (addressParts) {
+              const addrP = document.createElement("p");
+              addrP.style.margin = "0.25rem 0";
+              addrP.textContent = "Address: " + addressParts;
+              popupDiv.appendChild(addrP);
+            }
+
+            const coordP = document.createElement("p");
+            coordP.style.margin = "0.25rem 0";
+            coordP.textContent = "Coords: " + lat + ", " + lng;
+            popupDiv.appendChild(coordP);
+
+            marker.bindPopup(popupDiv);
+
+            // When marker is clicked, zoom in a bit (like your prof's example)
+            marker.on("click", function () {
+              this._map.setView(this.getLatLng(), 10);
+            });
+          });
+
+          if (markers.length > 0) {
+            const group = L.featureGroup(markers);
+            map.fitBounds(group.getBounds().pad(0.2));
+          }
+
+          setStatus(
+            "Loaded " +
+              entries.length +
+              " Location resources; " +
+              countWithCoords +
+              " had coordinates and are shown on the map."
+          );
+        })
+        .catch(function (err) {
+          console.error(err);
+          setStatus("");
+          setError(err.message || String(err));
+        });
+    }
+
+    // Kick off the load when the page runs
+    loadLocations();
+  </script>
+</body>
+</html>
