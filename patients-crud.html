@@ -1,313 +1,376 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Health CRUD – Patients</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mock FHIR: Patient Clinical Data Browser</title>
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    body { margin: 0; padding: 24px; background: #f7f7f8; color: #111; }
-    .app { max-width: 860px; margin: 0 auto; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    .subtitle { color: #555; margin-bottom: 20px; }
-
-    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-    .row { display: grid; grid-template-columns: repeat(5, 1fr) 140px; gap: 8px; align-items: end; }
-    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
-    input, select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; }
-    input:focus, select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #d1d5db; background: #111827; color: #fff; cursor: pointer; }
-    button.secondary { background: #fff; color: #111; }
-    button.ghost { background: transparent; color: #111; border: none; }
-    button + button { margin-left: 8px; }
-
-    .list { margin-top: 16px; }
-    .list-header, .list-item { display: grid; grid-template-columns: 40px repeat(4, 1fr) 140px; gap: 8px; align-items: center; }
-    .list-header { font-size: 12px; color: #6b7280; padding: 8px 4px; }
-    .list-item { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 8px; margin-bottom: 8px; }
-    .empty { color: #6b7280; text-align: center; padding: 16px; }
-    .muted { color: #6b7280; font-size: 12px; }
-    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; border: 1px solid #e0e7ff; }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; }
-    .right { text-align: right; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:24px;}
+    h2{margin-top:32px}
+    table{border-collapse:collapse;width:100%;margin:12px 0;}
+    th,td{border:1px solid #ddd;padding:8px;text-align:left;}
+    thead{background:#f5f5f5;}
+    tr:nth-child(even){background:#fafafa}
+    .row-actions button{margin-right:8px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    .note{font-size:.9rem;color:#555}
+    .error{color:#b00020}
   </style>
 </head>
 <body>
-  <div class="app">
-    <h1>Patients</h1>
-    <div class="subtitle">Vanilla JS CRUD. Data is in-memory only.</div>
+  <h1>Mock FHIR: Patient Clinical Data Browser</h1>
+  <p class="note">Backed by <code>https://r3.smarthealthit.org</code> (STU3). Some create/update operations can take a few minutes to appear in subsequent searches.</p>
 
-    <!-- CREATE -->
-    <div class="card" aria-labelledby="create-form-title">
-      <div id="create-form-title" class="muted" style="margin-bottom:8px">Create new patient</div>
-      <div class="row">
-        <div>
-          <label for="patientName">Name</label>
-          <input id="patientName" placeholder="Ada Lovelace" />
-        </div>
-        <div>
-          <label for="dob">DOB</label>
-          <input id="dob" type="date" />
-        </div>
-        <div>
-          <label for="mrn">MRN</label>
-          <input id="mrn" placeholder="e.g., MRN-12345" />
-        </div>
-        <div>
-          <label for="condition">Condition</label>
-          <input id="condition" placeholder="Type 2 diabetes" />
-        </div>
-        <div>
-          <label for="med">Medication</label>
-          <input id="med" placeholder="Metformin" />
-        </div>
-        <div class="right">
-          <button id="addBtn">Add patient</button>
-        </div>
-      </div>
-      <div class="muted" style="margin-top:8px">Press Enter in any input to add</div>
-    </div>
+  <div class="controls">
+    <input id="nameQuery" placeholder="Search patients by name (e.g., Smith)" />
+    <button id="btnSearch">Search Patients</button>
+    <button id="btnAddPatient">Add Patient</button>
+  </div>
+  <div id="status" class="note"></div>
+  <div id="error" class="error"></div>
 
-    <!-- RETRIEVE / DISPLAY -->
-    <div class="toolbar">
-      <div class="muted">All items</div>
-      <div>
-        <button class="secondary" id="seedBtn">Load 3 sample patients</button>
-        <button class="secondary" id="clearBtn">Clear all</button>
-      </div>
-    </div>
+  <h2>Patients</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>First</th>
+        <th>Last</th>
+        <th>DOB</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="patientResults"></tbody>
+  </table>
 
-    <div class="list">
-      <div class="list-header">
-        <div>#</div>
-        <div>Name</div>
-        <div>DOB</div>
-        <div>MRN</div>
-        <div>Condition / Medication</div>
-        <div class="right">Actions</div>
-      </div>
-      <div id="listRoot"></div>
-    </div>
+  <h2>Medications</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Medication</th>
+        <th>Status</th>
+        <th>Source</th>
+      </tr>
+    </thead>
+    <tbody id="medResults"></tbody>
+  </table>
+
+  <h2>Encounters</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Start</th>
+        <th>End</th>
+        <th>Class</th>
+        <th>Type</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody id="encResults"></tbody>
+  </table>
+
+  <h2>Diagnoses (Conditions)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Onset</th>
+        <th>Condition</th>
+        <th>Clinical Status</th>
+        <th>Verification</th>
+      </tr>
+    </thead>
+    <tbody id="condResults"></tbody>
+  </table>
+
+  <h2>Test Results (Observations)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Test</th>
+        <th>Value</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="obsResults"></tbody>
+  </table>
+
+  <div class="controls">
+    <button id="btnAddMockCondition" disabled>Add Mock Condition to Selected Patient</button>
+    <button id="btnAddMockObservation" disabled>Add Mock Observation to Selected Patient</button>
   </div>
 
   <script>
-    // In-memory store. Order in this array is the on-screen order.
-    /** @type {{id:number,name:string,dob:string,mrn:string,condition:string,med:string}[]} */
-    let patients = [];
+    /*
+      NOTE: Certain operations like Update and Create take time to appear in searches on r3.smarthealthit.org.
+      This page demonstrates querying and simple adds for demo data.
+    */
 
-    // DOM refs
-    const $ = (sel, root=document) => root.querySelector(sel);
-    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+    const client = FHIR.client("https://r3.smarthealthit.org"); // STU3 server
 
-    const nameInput = $("#patientName");
-    const dobInput  = $("#dob");
-    const mrnInput  = $("#mrn");
-    const condInput = $("#condition");
-    const medInput  = $("#med");
+    const el = sel => document.querySelector(sel);
+    const status = msg => el('#status').textContent = msg || '';
+    const showError = msg => el('#error').textContent = msg || '';
 
-    const addBtn   = $("#addBtn");
-    const seedBtn  = $("#seedBtn");
-    const clearBtn = $("#clearBtn");
-    const listRoot = $("#listRoot");
+    let selectedPatient = null; // store currently selected patient resource
 
-    // UTIL: trim and simple validation
-    const val = el => (el.value || "").trim();
+    // Utilities
+    function byDateDesc(a, b){ return (b._dt || 0) - (a._dt || 0); }
+    function safe(fn, fallback=''){ try { const v = fn(); return v==null ? fallback : v; } catch { return fallback; } }
 
-    // CREATE
-    function addPatient() {
-      const newPatient = {
-        id: Date.now(),
-        name: val(nameInput),
-        dob:  dobInput.value, // keep raw date
-        mrn:  val(mrnInput),
-        condition: val(condInput),
-        med: val(medInput)
+    // --- PATIENTS ---
+    async function searchPatients(){
+      showError('');
+      status('Searching…');
+      const q = (el('#nameQuery').value || '').trim();
+      const url = q ? `Patient?name=${encodeURIComponent(q)}` : 'Patient?_count=20&_sort=-_lastUpdated';
+      try{
+        const data = await client.request(url);
+        renderPatients(data);
+        status(`Found ${data.entry ? data.entry.length : 0} patients`);
+      }catch(err){ showError(err.message || String(err)); status(''); }
+    }
+
+    function renderPatients(bundle){
+      const tbody = el('#patientResults');
+      tbody.innerHTML='';
+      if(!bundle.entry){ return; }
+      bundle.entry.forEach(e => addPatientRow(e.resource));
+    }
+
+    function addPatientRow(patient){
+      const tbody = el('#patientResults');
+      const tr = document.createElement('tr');
+      const name0 = (patient.name && patient.name[0]) || {};
+      const first = (name0.given && name0.given[0]) || '';
+      const last = name0.family || '';
+      tr.innerHTML = `
+        <td>${patient.id || ''}</td>
+        <td>${first}</td>
+        <td>${last}</td>
+        <td>${patient.birthDate || ''}</td>
+        <td class="row-actions"></td>
+      `;
+      const actions = tr.querySelector('.row-actions');
+      const btnLoad = document.createElement('button');
+      btnLoad.textContent = 'Load Clinical Data';
+      btnLoad.onclick = () => loadAllForPatient(patient);
+      const btnDelete = document.createElement('button');
+      btnDelete.textContent = 'Delete';
+      btnDelete.onclick = () => deletePatient(patient.id, tr);
+      const btnEdit = document.createElement('button');
+      btnEdit.textContent = 'Edit';
+      btnEdit.onclick = () => updatePatientName(patient, tr);
+      actions.append(btnLoad, btnEdit, btnDelete);
+      tbody.appendChild(tr);
+    }
+
+    async function addPatient(){
+      const firstname = prompt('First name?');
+      if(!firstname) return;
+      const lastname = prompt('Last name?');
+      if(!lastname) return;
+      const dob = prompt('Birth date? (YYYY-MM-DD)', '1980-01-01');
+      const patient = {
+        resourceType:'Patient',
+        name:[{ given:[firstname], family: lastname }],
+        birthDate: dob
       };
-      // Basic validation: require name and MRN
-      if (!newPatient.name || !newPatient.mrn) {
-        alert("Please provide at least Name and MRN.");
-        return;
-      }
-      // Optional: prevent duplicate MRNs
-      if (patients.some(p => p.mrn.toLowerCase() === newPatient.mrn.toLowerCase())) {
-        alert("MRN already exists in the list.");
-        return;
-      }
-      patients.push(newPatient); // append -> appears at bottom
-      clearCreateForm();
-      render();
+      try{
+        const created = await client.create(patient);
+        addPatientRow(created);
+        status(`Added patient ${created.id}`);
+      }catch(err){ showError(err.message || String(err)); }
     }
 
-    function clearCreateForm() {
-      nameInput.value = "";
-      dobInput.value = "";
-      mrnInput.value = "";
-      condInput.value = "";
-      medInput.value = "";
-      nameInput.focus();
+    async function updatePatientName(patient, row){
+      const firstname = prompt('First name?', safe(()=>patient.name[0].given[0]));
+      if(!firstname) return;
+      const lastname = prompt('Last name?', safe(()=>patient.name[0].family));
+      if(!lastname) return;
+      try{
+        const updated = await client.patch(`Patient/${patient.id}`, [
+          { op:'replace', path:'/name/0/given/0', value: firstname },
+          { op:'replace', path:'/name/0/family', value: lastname }
+        ]);
+        // Replace the row with updated info
+        row.parentNode.removeChild(row);
+        addPatientRow(updated);
+        status(`Updated patient ${updated.id}`);
+      }catch(err){ showError(err.message || String(err)); }
     }
 
-    // RETRIEVE / DISPLAY
-    function render() {
-      listRoot.innerHTML = "";
-      if (patients.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "No patients yet.";
-        listRoot.appendChild(empty);
-        return;
-      }
+    async function deletePatient(id, row){
+      if(!confirm('Delete this patient?')) return;
+      try{
+        await client.delete(`Patient/${id}`);
+        row.parentNode.removeChild(row);
+        status(`Deleted patient ${id}`);
+      }catch(err){ showError(err.message || String(err)); }
+    }
 
-      patients.forEach((p, idx) => {
-        const row = document.createElement("div");
-        row.className = "list-item";
+    // --- LOAD CLINICAL DATA ---
+    async function loadAllForPatient(patient){
+      selectedPatient = patient;
+      el('#btnAddMockCondition').disabled = false;
+      el('#btnAddMockObservation').disabled = false;
+      clearClinicalTables();
+      status(`Loading clinical data for patient ${patient.id}…`);
+      try{
+        const [medStmts, medReqs, encounters, conditions, observations] = await Promise.all([
+          client.request(`MedicationStatement?patient=${patient.id}&_count=50`),
+          client.request(`MedicationRequest?patient=${patient.id}&_count=50`),
+          client.request(`Encounter?patient=${patient.id}&_count=50`),
+          client.request(`Condition?patient=${patient.id}&_count=50`),
+          client.request(`Observation?patient=${patient.id}&_sort=-date&_count=100`)
+        ]);
+        renderMeds(medStmts, medReqs);
+        renderEncounters(encounters);
+        renderConditions(conditions);
+        renderObservations(observations);
+        status(`Loaded clinical data for ${patient.id}`);
+      }catch(err){ showError(err.message || String(err)); status(''); }
+    }
 
-        const cIdx = document.createElement("div");
-        cIdx.textContent = String(idx + 1);
-        row.appendChild(cIdx);
+    function clearClinicalTables(){
+      el('#medResults').innerHTML='';
+      el('#encResults').innerHTML='';
+      el('#condResults').innerHTML='';
+      el('#obsResults').innerHTML='';
+    }
 
-        const cName = document.createElement("div");
-        cName.textContent = p.name;
-        row.appendChild(cName);
+    // ---- Renderers ----
+    function renderMeds(stmtBundle, reqBundle){
+      const tbody = el('#medResults');
+      const rows = [];
 
-        const cDOB = document.createElement("div");
-        cDOB.textContent = p.dob || "—";
-        row.appendChild(cDOB);
+      const addRow = (r, source) => {
+        const medText = safe(()=>r.medicationCodeableConcept.text,
+          safe(()=>r.medicationCodeableConcept.coding[0].display, '(unknown)'));
+        const date = safe(()=> r.effectiveDateTime || r.effectivePeriod.start || r.authoredOn || r.dateWritten || r.meta.lastUpdated, '');
+        const status = r.status || '';
+        rows.push({date, medText, status, source, _dt: Date.parse(date)});
+      };
 
-        const cMRN = document.createElement("div");
-        cMRN.textContent = p.mrn;
-        row.appendChild(cMRN);
+      (stmtBundle.entry||[]).forEach(e=> addRow(e.resource, 'MedicationStatement'));
+      (reqBundle.entry||[]).forEach(e=> addRow(e.resource, 'MedicationRequest'));
 
-        const cCondMed = document.createElement("div");
-        cCondMed.innerHTML = `<span class="badge">${p.condition || "No condition"}</span> · ${p.med || "No medication"}`;
-        row.appendChild(cCondMed);
-
-        const cActions = document.createElement("div");
-        cActions.className = "right";
-
-        const editBtn = document.createElement("button");
-        editBtn.textContent = "Edit";
-        editBtn.addEventListener("click", editRow.bind(row, p.id, idx, row));
-
-        const delBtn = document.createElement("button");
-        delBtn.textContent = "Delete";
-        delBtn.className = "secondary";
-        delBtn.addEventListener("click", removeRow.bind(row, p.id, idx, row));
-
-        cActions.appendChild(editBtn);
-        cActions.appendChild(delBtn);
-        row.appendChild(cActions);
-
-        listRoot.appendChild(row);
+      rows.sort(byDateDesc).forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.date||''}</td><td>${r.medText}</td><td>${r.status}</td><td>${r.source}</td>`;
+        tbody.appendChild(tr);
       });
     }
 
-    // UPDATE (inline edit while keeping position)
-    function editRow(id, index, rowEl) {
-      const p = patients[index];
-      if (!p || p.id !== id) return; // simple guard
-
-      // Replace the row with inputs but keep the same DOM node
-      rowEl.innerHTML = "";
-
-      const cIdx = document.createElement("div");
-      cIdx.textContent = String(index + 1);
-      rowEl.appendChild(cIdx);
-
-      const nameIn = document.createElement("input");
-      nameIn.value = p.name; nameIn.placeholder = "Name";
-      rowEl.appendChild(nameIn);
-
-      const dobIn = document.createElement("input");
-      dobIn.type = "date"; dobIn.value = p.dob || "";
-      rowEl.appendChild(dobIn);
-
-      const mrnIn = document.createElement("input");
-      mrnIn.value = p.mrn; mrnIn.placeholder = "MRN";
-      rowEl.appendChild(mrnIn);
-
-      const cmWrap = document.createElement("div");
-      const condIn = document.createElement("input");
-      condIn.value = p.condition || ""; condIn.placeholder = "Condition"; condIn.style.marginBottom = "6px";
-      const medIn = document.createElement("input");
-      medIn.value = p.med || ""; medIn.placeholder = "Medication";
-      cmWrap.appendChild(condIn); cmWrap.appendChild(medIn);
-      rowEl.appendChild(cmWrap);
-
-      const actions = document.createElement("div");
-      actions.className = "right";
-
-      const saveBtn = document.createElement("button");
-      saveBtn.textContent = "Save";
-      saveBtn.addEventListener("click", function() {
-        const updated = {
-          ...p,
-          name: nameIn.value.trim(),
-          dob: dobIn.value,
-          mrn: mrnIn.value.trim(),
-          condition: condIn.value.trim(),
-          med: medIn.value.trim()
-        };
-        if (!updated.name || !updated.mrn) {
-          alert("Name and MRN are required.");
-          return;
-        }
-        // If MRN changed, ensure uniqueness
-        const dup = patients.find((x, i) => i !== index && x.mrn.toLowerCase() === updated.mrn.toLowerCase());
-        if (dup) { alert("Another patient already has this MRN."); return; }
-
-        // Keep position the same: mutate the object at index
-        patients[index] = updated;
-        render();
+    function renderEncounters(bundle){
+      const tbody = el('#encResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const start = safe(()=>r.period.start,'');
+        const end = safe(()=>r.period.end,'');
+        const cls = safe(()=>r.class.display, safe(()=>r.class.code,''));
+        const type = safe(()=>r.type[0].text, safe(()=>r.type[0].coding[0].display,''));
+        const loc = safe(()=>r.location[0].location.display,'');
+        return {start,end,cls,type,loc,_dt:Date.parse(start)};
+      }).sort(byDateDesc);
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.start}</td><td>${r.end||''}</td><td>${r.cls||''}</td><td>${r.type||''}</td><td>${r.loc||''}</td>`;
+        tbody.appendChild(tr);
       });
-
-      const cancelBtn = document.createElement("button");
-      cancelBtn.textContent = "Cancel";
-      cancelBtn.className = "secondary";
-      cancelBtn.addEventListener("click", render);
-
-      actions.appendChild(saveBtn);
-      actions.appendChild(cancelBtn);
-      rowEl.appendChild(actions);
-
-      nameIn.focus();
     }
 
-    // DELETE
-    function removeRow(id, index, rowEl) {
-      const p = patients[index];
-      if (!p || p.id !== id) return;
-      if (confirm(`Delete ${p.name} (${p.mrn})?`)) {
-        patients.splice(index, 1);
-        // Remove only this row for a small perf win
-        if (rowEl && rowEl.parentNode) rowEl.parentNode.removeChild(rowEl);
-        // But indexes changed, so re-render to refresh actions' bound index
-        render();
-      }
-    }
-
-    // Seed data for quick demo
-    function seed() {
-      patients = [
-        { id: Date.now()-3, name: "Ada Lovelace", dob: "1815-12-10", mrn: "MRN-1001", condition: "Type 2 diabetes", med: "Metformin" },
-        { id: Date.now()-2, name: "Ignaz Semmelweis", dob: "1818-07-01", mrn: "MRN-1002", condition: "Hypertension", med: "Lisinopril" },
-        { id: Date.now()-1, name: "Virginia Apgar", dob: "1909-06-07", mrn: "MRN-1003", condition: "Hyperlipidemia", med: "Atorvastatin" }
-      ];
-      render();
-    }
-
-    // Wire events
-    addBtn.addEventListener("click", addPatient);
-    ;[nameInput, dobInput, mrnInput, condInput, medInput].forEach(el => {
-      el.addEventListener("keyup", (evt) => {
-        if (evt.key === "Enter") addPatient();
+    function renderConditions(bundle){
+      const tbody = el('#condResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const onset = safe(()=>r.onsetDateTime, safe(()=>r.onsetPeriod.start,''));
+        const text = safe(()=>r.code.text, safe(()=>r.code.coding[0].display,'(unknown)'));
+        const clinical = r.clinicalStatus || '';
+        const verification = r.verificationStatus || '';
+        return {onset,text,clinical,verification,_dt:Date.parse(onset)};
+      }).sort(byDateDesc);
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.onset||''}</td><td>${r.text}</td><td>${r.clinical}</td><td>${r.verification}</td>`;
+        tbody.appendChild(tr);
       });
-    });
-    seedBtn.addEventListener("click", seed);
-    clearBtn.addEventListener("click", () => { if (confirm("Clear entire list?")) { patients = []; render(); } });
+    }
 
-    // Initial render
-    render();
+    function renderObservations(bundle){
+      const tbody = el('#obsResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const date = safe(()=>r.effectiveDateTime, safe(()=>r.effectivePeriod.start, safe(()=>r.issued,'')));
+        const test = safe(()=>r.code.text, safe(()=>r.code.coding[0].display,'(unknown)'));
+        const status = r.status || '';
+        const value = (function(){
+          if (r.valueQuantity) {
+            const v = r.valueQuantity;
+            return `${v.value} ${v.unit || v.code || ''}`.trim();
+          }
+          if (r.valueString) return r.valueString;
+          if (r.valueCodeableConcept) return safe(()=>r.valueCodeableConcept.text, safe(()=>r.valueCodeableConcept.coding[0].display,''));
+          return '';
+        })();
+        return {date,test,value,status,_dt:Date.parse(date)};
+      }).sort(byDateDesc);
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.date||''}</td><td>${r.test}</td><td>${r.value||''}</td><td>${r.status}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // --- ADD SOME RECORDS (Alternative assignment path) ---
+    async function addMockCondition(){
+      if(!selectedPatient){ return alert('Select a patient first by clicking "Load Clinical Data".'); }
+      const condition = {
+        resourceType:'Condition',
+        subject:{ reference:`Patient/${selectedPatient.id}` },
+        code:{ coding:[{ system:'http://snomed.info/sct', code:'38341003', display:'Hypertension' }], text:'Hypertension' },
+        clinicalStatus:'active',
+        verificationStatus:'confirmed',
+        onsetDateTime:new Date().toISOString().substring(0,10)
+      };
+      try{
+        const created = await client.create(condition);
+        status(`Added Condition ${created.id}`);
+        // Refresh conditions only
+        const bundle = await client.request(`Condition?patient=${selectedPatient.id}`);
+        renderConditions(bundle);
+      }catch(err){ showError(err.message || String(err)); }
+    }
+
+    async function addMockObservation(){
+      if(!selectedPatient){ return alert('Select a patient first by clicking "Load Clinical Data".'); }
+      const observation = {
+        resourceType:'Observation',
+        status:'final',
+        category:[{ coding:[{ system:'http://terminology.hl7.org/CodeSystem/observation-category', code:'laboratory', display:'Laboratory' }] }],
+        code:{ coding:[{ system:'http://loinc.org', code:'718-7', display:'Hemoglobin [Mass/volume] in Blood' }], text:'Hemoglobin' },
+        subject:{ reference:`Patient/${selectedPatient.id}` },
+        effectiveDateTime: new Date().toISOString(),
+        valueQuantity:{ value: 14.2, unit:'g/dL', system:'http://unitsofmeasure.org', code:'g/dL' }
+      };
+      try{
+        const created = await client.create(observation);
+        status(`Added Observation ${created.id}`);
+        const bundle = await client.request(`Observation?patient=${selectedPatient.id}&_sort=-date&_count=100`);
+        renderObservations(bundle);
+      }catch(err){ showError(err.message || String(err)); }
+    }
+
+    // --- wire up UI ---
+    el('#btnSearch').onclick = searchPatients;
+    el('#btnAddPatient').onclick = addPatient;
+    el('#btnAddMockCondition').onclick = addMockCondition;
+    el('#btnAddMockObservation').onclick = addMockObservation;
+
+    // Optional: do an initial search
+    searchPatients();
   </script>
 </body>
 </html>
