@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Encounter Types Chart (FHIR + Highcharts)</title>
+
+  <!-- FHIR client -->
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
+
+  <!-- Highcharts core -->
+  <script src="https://code.highcharts.com/highcharts.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 2rem;
+      line-height: 1.6;
+    }
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+    .note {
+      font-size: 0.9rem;
+      color: #555;
+      margin-top: 0;
+    }
+    #status {
+      font-size: 0.9rem;
+      color: #333;
+      margin-top: 0.5rem;
+    }
+    #error {
+      font-size: 0.9rem;
+      color: #b00020;
+      margin-top: 0.25rem;
+    }
+    #controls {
+      margin: 1rem 0;
+    }
+    #container {
+      width: 100%;
+      max-width: 900px;
+      height: 500px;
+      margin-top: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Encounter Types Chart</h1>
+  <p class="note">
+    This page queries the mock FHIR server at
+    <code>https://r3.smarthealthit.org</code>, pulls <strong>Encounter</strong>
+    data for a selected patient, and shows a <strong>column chart</strong> of
+    the number of encounters by type using Highcharts.
+  </p>
+
+  <div id="controls">
+    <button onclick="pickPatientAndChart();">
+      Pick Patient &amp; Show Encounter Type Chart
+    </button>
+  </div>
+
+  <p id="status"></p>
+  <p id="error"></p>
+  <p id="patientInfo"></p>
+
+  <!-- Highcharts chart container -->
+  <div id="container"></div>
+
+  <script>
+    // FHIR client for the mock server
+    const client = FHIR.client("https://r3.smarthealthit.org");
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg || "";
+    }
+    function setError(msg) {
+      document.getElementById("error").textContent = msg || "";
+    }
+    function setPatientInfo(msg) {
+      document.getElementById("patientInfo").textContent = msg || "";
+    }
+    function safe(fn, fallback = "") {
+      try {
+        const v = fn();
+        return v == null ? fallback : v;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    // Step 1: let the user pick a patient by name, grab the first match,
+    // then build the chart for that patient.
+    function pickPatientAndChart() {
+      setError("");
+      setStatus("");
+      setPatientInfo("");
+
+      const name = prompt("Enter a patient name to search (e.g., 'smith'):");
+      if (!name) {
+        return;
+      }
+
+      setStatus("Searching for patient…");
+
+      client
+        .request("Patient?name=" + encodeURIComponent(name) + "&_count=1")
+        .then(function (bundle) {
+          if (!bundle.entry || bundle.entry.length === 0) {
+            setStatus("");
+            setError("No patients found for name: " + name);
+            return;
+          }
+
+          const patient = bundle.entry[0].resource;
+          const displayName =
+            safe(() => patient.name[0].given[0], "") +
+            " " +
+            safe(() => patient.name[0].family, "");
+          setPatientInfo(
+            "Using patient: " +
+              displayName +
+              " (ID: " +
+              patient.id +
+              ")"
+          );
+
+          // Once we have a patient, fetch their encounters and build the chart
+          fetchEncountersAndChart(patient);
+        })
+        .catch(function (err) {
+          console.error(err);
+          setStatus("");
+          setError(err.message || String(err));
+        });
+    }
+
+    // Step 2: fetch encounters for that patient and group them by type
+    function fetchEncountersAndChart(patient) {
+      setStatus("Loading encounters for patient " + patient.id + "…");
+      setError("");
+
+      const url =
+        "Encounter?patient=" + encodeURIComponent(patient.id) + "&_count=200";
+
+      client
+        .request(url)
+        .then(function (bundle) {
+          const countsByType = {};
+
+          (bundle.entry || []).forEach(function (entry) {
+            const enc = entry.resource;
+
+            // Encounter type text: try text, then coding display, else "Unknown"
+            const typeText =
+              safe(() => enc.type[0].text,
+                safe(() => enc.type[0].coding[0].display, "Unknown")
+              ) || "Unknown";
+
+            if (!countsByType[typeText]) {
+              countsByType[typeText] = 0;
+            }
+            countsByType[typeText] += 1;
+          });
+
+          const types = Object.keys(countsByType);
+          if (types.length === 0) {
+            setStatus("This patient has no encounters on the server.");
+            drawEmptyChart();
+            return;
+          }
+
+          const counts = types.map((t) => countsByType[t]);
+
+          setStatus(
+            "Found " +
+              counts.reduce((a, b) => a + b, 0) +
+              " encounters in " +
+              types.length +
+              " type(s)."
+          );
+
+          const displayName =
+            safe(() => patient.name[0].given[0], "") +
+            " " +
+            safe(() => patient.name[0].family, "");
+
+          drawEncounterChart(types, counts, displayName);
+        })
+        .catch(function (err) {
+          console.error(err);
+          setStatus("");
+          setError(err.message || String(err));
+        });
+    }
+
+    // Step 3: draw the column chart using Highcharts
+    function drawEncounterChart(types, counts, patientName) {
+      Highcharts.chart("container", {
+        chart: {
+          type: "column"
+        },
+        title: {
+          text: "Encounter Counts by Type",
+          align: "left"
+        },
+        subtitle: {
+          text:
+            "Patient: " +
+            (patientName || "Unknown") +
+            " • Source: r3.smarthealthit.org",
+          align: "left"
+        },
+        xAxis: {
+          categories: types,
+          title: {
+            text: "Encounter Type"
+          },
+          labels: {
+            style: {
+              fontSize: "11px"
+            }
+          }
+        },
+        yAxis: {
+          min: 0,
+          allowDecimals: false,
+          title: {
+            text: "Number of Encounters"
+          }
+        },
+        legend: {
+          enabled: false
+        },
+        tooltip: {
+          pointFormat: "<b>{point.y} encounter(s)</b>"
+        },
+        series: [
+          {
+            name: "Encounters",
+            data: counts
+          }
+        ],
+        responsive: {
+          rules: [
+            {
+              condition: {
+                maxWidth: 600
+              },
+              chartOptions: {
+                xAxis: {
+                  labels: {
+                    rotation: -45
+                  }
+                }
+              }
+            }
+          ]
+        }
+      });
+    }
+
+    // Optional: if a patient has no encounters, show an empty chart placeholder
+    function drawEmptyChart() {
+      Highcharts.chart("container", {
+        title: {
+          text: "No Encounter Data Available",
+          align: "left"
+        },
+        series: [],
+        xAxis: {
+          title: { text: null }
+        },
+        yAxis: {
+          title: { text: null }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
