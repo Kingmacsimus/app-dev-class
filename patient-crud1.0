@@ -1,1 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Health CRUD – Patients</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    body { margin: 0; padding: 24px; background: #f7f7f8; color: #111; }
+    .app { max-width: 860px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .subtitle { color: #555; margin-bottom: 20px; }
 
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .row { display: grid; grid-template-columns: repeat(5, 1fr) 140px; gap: 8px; align-items: end; }
+    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
+    input, select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; }
+    input:focus, select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #d1d5db; background: #111827; color: #fff; cursor: pointer; }
+    button.secondary { background: #fff; color: #111; }
+    button.ghost { background: transparent; color: #111; border: none; }
+    button + button { margin-left: 8px; }
+
+    .list { margin-top: 16px; }
+    .list-header, .list-item { display: grid; grid-template-columns: 40px repeat(4, 1fr) 140px; gap: 8px; align-items: center; }
+    .list-header { font-size: 12px; color: #6b7280; padding: 8px 4px; }
+    .list-item { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 8px; margin-bottom: 8px; }
+    .empty { color: #6b7280; text-align: center; padding: 16px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; border: 1px solid #e0e7ff; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; }
+    .right { text-align: right; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Patients</h1>
+    <div class="subtitle">Vanilla JS CRUD. Data is in-memory only.</div>
+
+    <!-- CREATE -->
+    <div class="card" aria-labelledby="create-form-title">
+      <div id="create-form-title" class="muted" style="margin-bottom:8px">Create new patient</div>
+      <div class="row">
+        <div>
+          <label for="patientName">Name</label>
+          <input id="patientName" placeholder="Ada Lovelace" />
+        </div>
+        <div>
+          <label for="dob">DOB</label>
+          <input id="dob" type="date" />
+        </div>
+        <div>
+          <label for="mrn">MRN</label>
+          <input id="mrn" placeholder="e.g., MRN-12345" />
+        </div>
+        <div>
+          <label for="condition">Condition</label>
+          <input id="condition" placeholder="Type 2 diabetes" />
+        </div>
+        <div>
+          <label for="med">Medication</label>
+          <input id="med" placeholder="Metformin" />
+        </div>
+        <div class="right">
+          <button id="addBtn">Add patient</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:8px">Press Enter in any input to add</div>
+    </div>
+
+    <!-- RETRIEVE / DISPLAY -->
+    <div class="toolbar">
+      <div class="muted">All items</div>
+      <div>
+        <button class="secondary" id="seedBtn">Load 3 sample patients</button>
+        <button class="secondary" id="clearBtn">Clear all</button>
+      </div>
+    </div>
+
+    <div class="list">
+      <div class="list-header">
+        <div>#</div>
+        <div>Name</div>
+        <div>DOB</div>
+        <div>MRN</div>
+        <div>Condition / Medication</div>
+        <div class="right">Actions</div>
+      </div>
+      <div id="listRoot"></div>
+    </div>
+  </div>
+
+  <script>
+    // In-memory store. Order in this array is the on-screen order.
+    /** @type {{id:number,name:string,dob:string,mrn:string,condition:string,med:string}[]} */
+    let patients = [];
+
+    // DOM refs
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+    const nameInput = $("#patientName");
+    const dobInput  = $("#dob");
+    const mrnInput  = $("#mrn");
+    const condInput = $("#condition");
+    const medInput  = $("#med");
+
+    const addBtn   = $("#addBtn");
+    const seedBtn  = $("#seedBtn");
+    const clearBtn = $("#clearBtn");
+    const listRoot = $("#listRoot");
+
+    // UTIL: trim and simple validation
+    const val = el => (el.value || "").trim();
+
+    // CREATE
+    function addPatient() {
+      const newPatient = {
+        id: Date.now(),
+        name: val(nameInput),
+        dob:  dobInput.value, // keep raw date
+        mrn:  val(mrnInput),
+        condition: val(condInput),
+        med: val(medInput)
+      };
+      // Basic validation: require name and MRN
+      if (!newPatient.name || !newPatient.mrn) {
+        alert("Please provide at least Name and MRN.");
+        return;
+      }
+      // Optional: prevent duplicate MRNs
+      if (patients.some(p => p.mrn.toLowerCase() === newPatient.mrn.toLowerCase())) {
+        alert("MRN already exists in the list.");
+        return;
+      }
+      patients.push(newPatient); // append -> appears at bottom
+      clearCreateForm();
+      render();
+    }
+
+    function clearCreateForm() {
+      nameInput.value = "";
+      dobInput.value = "";
+      mrnInput.value = "";
+      condInput.value = "";
+      medInput.value = "";
+      nameInput.focus();
+    }
+
+    // RETRIEVE / DISPLAY
+    function render() {
+      listRoot.innerHTML = "";
+      if (patients.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No patients yet.";
+        listRoot.appendChild(empty);
+        return;
+      }
+
+      patients.forEach((p, idx) => {
+        const row = document.createElement("div");
+        row.className = "list-item";
+
+        const cIdx = document.createElement("div");
+        cIdx.textContent = String(idx + 1);
+        row.appendChild(cIdx);
+
+        const cName = document.createElement("div");
+        cName.textContent = p.name;
+        row.appendChild(cName);
+
+        const cDOB = document.createElement("div");
+        cDOB.textContent = p.dob || "—";
+        row.appendChild(cDOB);
+
+        const cMRN = document.createElement("div");
+        cMRN.textContent = p.mrn;
+        row.appendChild(cMRN);
+
+        const cCondMed = document.createElement("div");
+        cCondMed.innerHTML = `<span class="badge">${p.condition || "No condition"}</span> · ${p.med || "No medication"}`;
+        row.appendChild(cCondMed);
+
+        const cActions = document.createElement("div");
+        cActions.className = "right";
+
+        const editBtn = document.createElement("button");
+        editBtn.textContent = "Edit";
+        editBtn.addEventListener("click", editRow.bind(row, p.id, idx, row));
+
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Delete";
+        delBtn.className = "secondary";
+        delBtn.addEventListener("click", removeRow.bind(row, p.id, idx, row));
+
+        cActions.appendChild(editBtn);
+        cActions.appendChild(delBtn);
+        row.appendChild(cActions);
+
+        listRoot.appendChild(row);
+      });
+    }
+
+    // UPDATE (inline edit while keeping position)
+    function editRow(id, index, rowEl) {
+      const p = patients[index];
+      if (!p || p.id !== id) return; // simple guard
+
+      // Replace the row with inputs but keep the same DOM node
+      rowEl.innerHTML = "";
+
+      const cIdx = document.createElement("div");
+      cIdx.textContent = String(index + 1);
+      rowEl.appendChild(cIdx);
+
+      const nameIn = document.createElement("input");
+      nameIn.value = p.name; nameIn.placeholder = "Name";
+      rowEl.appendChild(nameIn);
+
+      const dobIn = document.createElement("input");
+      dobIn.type = "date"; dobIn.value = p.dob || "";
+      rowEl.appendChild(dobIn);
+
+      const mrnIn = document.createElement("input");
+      mrnIn.value = p.mrn; mrnIn.placeholder = "MRN";
+      rowEl.appendChild(mrnIn);
+
+      const cmWrap = document.createElement("div");
+      const condIn = document.createElement("input");
+      condIn.value = p.condition || ""; condIn.placeholder = "Condition"; condIn.style.marginBottom = "6px";
+      const medIn = document.createElement("input");
+      medIn.value = p.med || ""; medIn.placeholder = "Medication";
+      cmWrap.appendChild(condIn); cmWrap.appendChild(medIn);
+      rowEl.appendChild(cmWrap);
+
+      const actions = document.createElement("div");
+      actions.className = "right";
+
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", function() {
+        const updated = {
+          ...p,
+          name: nameIn.value.trim(),
+          dob: dobIn.value,
+          mrn: mrnIn.value.trim(),
+          condition: condIn.value.trim(),
+          med: medIn.value.trim()
+        };
+        if (!updated.name || !updated.mrn) {
+          alert("Name and MRN are required.");
+          return;
+        }
+        // If MRN changed, ensure uniqueness
+        const dup = patients.find((x, i) => i !== index && x.mrn.toLowerCase() === updated.mrn.toLowerCase());
+        if (dup) { alert("Another patient already has this MRN."); return; }
+
+        // Keep position the same: mutate the object at index
+        patients[index] = updated;
+        render();
+      });
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.className = "secondary";
+      cancelBtn.addEventListener("click", render);
+
+      actions.appendChild(saveBtn);
+      actions.appendChild(cancelBtn);
+      rowEl.appendChild(actions);
+
+      nameIn.focus();
+    }
+
+    // DELETE
+    function removeRow(id, index, rowEl) {
+      const p = patients[index];
+      if (!p || p.id !== id) return;
+      if (confirm(`Delete ${p.name} (${p.mrn})?`)) {
+        patients.splice(index, 1);
+        // Remove only this row for a small perf win
+        if (rowEl && rowEl.parentNode) rowEl.parentNode.removeChild(rowEl);
+        // But indexes changed, so re-render to refresh actions' bound index
+        render();
+      }
+    }
+
+    // Seed data for quick demo
+    function seed() {
+      patients = [
+        { id: Date.now()-3, name: "Ada Lovelace", dob: "1815-12-10", mrn: "MRN-1001", condition: "Type 2 diabetes", med: "Metformin" },
+        { id: Date.now()-2, name: "Ignaz Semmelweis", dob: "1818-07-01", mrn: "MRN-1002", condition: "Hypertension", med: "Lisinopril" },
+        { id: Date.now()-1, name: "Virginia Apgar", dob: "1909-06-07", mrn: "MRN-1003", condition: "Hyperlipidemia", med: "Atorvastatin" }
+      ];
+      render();
+    }
+
+    // Wire events
+    addBtn.addEventListener("click", addPatient);
+    ;[nameInput, dobInput, mrnInput, condInput, medInput].forEach(el => {
+      el.addEventListener("keyup", (evt) => {
+        if (evt.key === "Enter") addPatient();
+      });
+    });
+    seedBtn.addEventListener("click", seed);
+    clearBtn.addEventListener("click", () => { if (confirm("Clear entire list?")) { patients = []; render(); } });
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
