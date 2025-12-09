@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mock FHIR: Patient Clinical Data Browser</title>
+
+  <!-- SMART-on-FHIR JS client -->
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
+
+  <!-- Chart.js (for the simple Hemoglobin trend chart) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:24px;}
+    h2{margin-top:32px}
+    table{border-collapse:collapse;width:100%;margin:12px 0;}
+    th,td{border:1px solid #ddd;padding:8px;text-align:left;}
+    thead{background:#f5f5f5;}
+    tr:nth-child(even){background:#fafafa}
+    .row-actions button{margin-right:8px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    .note{font-size:.9rem;color:#555}
+    .error{color:#b00020}
+  </style>
+</head>
+<body>
+  <h1>Mock FHIR: Patient Clinical Data Browser</h1>
+  <p class="note">
+    Backed by the FHIR server configured via the SMART demo launcher.
+    Some create/update operations can take a few minutes to appear in subsequent searches.
+  </p>
+
+  <div class="controls">
+    <input id="nameQuery" placeholder="Search patients by name (e.g., Smith)" />
+    <button id="btnSearch">Search Patients</button>
+    <button id="btnAddPatient">Add Patient</button>
+  </div>
+  <div id="status" class="note"></div>
+  <div id="error" class="error"></div>
+
+  <h2>Patients</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>First</th>
+        <th>Last</th>
+        <th>DOB</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="patientResults"></tbody>
+  </table>
+
+  <h2>Medications</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Medication</th>
+        <th>Status</th>
+        <th>Source</th>
+      </tr>
+    </thead>
+    <tbody id="medResults"></tbody>
+  </table>
+
+  <h2>Encounters</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Start</th>
+        <th>End</th>
+        <th>Class</th>
+        <th>Type</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody id="encResults"></tbody>
+  </table>
+
+  <h2>Diagnoses (Conditions)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Onset</th>
+        <th>Condition</th>
+        <th>Clinical Status</th>
+        <th>Verification</th>
+      </tr>
+    </thead>
+    <tbody id="condResults"></tbody>
+  </table>
+
+  <h2>Test Results (Observations)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Test</th>
+        <th>Value</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="obsResults"></tbody>
+  </table>
+
+  <!-- Simple chart: Hemoglobin trend over time -->
+  <h3>Hemoglobin Trend</h3>
+  <canvas id="hemoChart" width="400" height="200"></canvas>
+
+  <div class="controls">
+    <button id="btnAddMockCondition" disabled>Add Mock Condition to Selected Patient</button>
+    <button id="btnAddMockObservation" disabled>Add Mock Observation to Selected Patient</button>
+  </div>
+
+  <script>
+    /*
+      This page is intended to be launched via a SMART-on-FHIR demo launcher.
+      It uses FHIR.oauth2.ready() to obtain a client configured with the correct
+      FHIR endpoint and access token.
+    */
+
+    let client = null;           // SMART client (set after oauth2.ready)
+    let selectedPatient = null;  // store currently selected patient resource
+    let hemoChartInstance = null; // Chart.js instance
+
+    const el = sel => document.querySelector(sel);
+    const status = msg => el('#status').textContent = msg || '';
+    const showError = msg => el('#error').textContent = msg || '';
+
+    function byDateDesc(a, b){ return (b._dt || 0) - (a._dt || 0); }
+    function safe(fn, fallback=''){ try { const v = fn(); return v==null ? fallback : v; } catch { return fallback; } }
+
+    // --- SMART on FHIR initialization ---
+    status('Initializing SMART FHIR client…');
+
+    FHIR.oauth2.ready().then(c => {
+      client = c;
+      status('SMART client ready. You can search patients or load clinical data.');
+      wireUi();
+      searchPatients(); // optional initial search
+    }).catch(err => {
+      showError('Failed to initialize SMART client: ' + (err.message || String(err)));
+      status('');
+    });
+
+    function wireUi() {
+      el('#btnSearch').onclick = searchPatients;
+      el('#btnAddPatient').onclick = addPatient;
+      el('#btnAddMockCondition').onclick = addMockCondition;
+      el('#btnAddMockObservation').onclick = addMockObservation;
+    }
+
+    // --- PATIENTS ---
+    async function searchPatients(){
+      if (!client) return;
+      showError('');
+      status('Searching patients…');
+      const q = (el('#nameQuery').value || '').trim();
+      const url = q ? `Patient?name=${encodeURIComponent(q)}` : 'Patient?_count=20&_sort=-_lastUpdated';
+      try{
+        const data = await client.request(url);
+        renderPatients(data);
+        status(`Found ${data.entry ? data.entry.length : 0} patients`);
+      }catch(err){
+        showError(err.message || String(err));
+        status('');
+      }
+    }
+
+    function renderPatients(bundle){
+      const tbody = el('#patientResults');
+      tbody.innerHTML='';
+      if(!bundle.entry){ return; }
+      bundle.entry.forEach(e => addPatientRow(e.resource));
+    }
+
+    function addPatientRow(patient){
+      const tbody = el('#patientResults');
+      const tr = document.createElement('tr');
+      const name0 = (patient.name && patient.name[0]) || {};
+      const first = (name0.given && name0.given[0]) || '';
+      const last = name0.family || '';
+      tr.innerHTML = `
+        <td>${patient.id || ''}</td>
+        <td>${first}</td>
+        <td>${last}</td>
+        <td>${patient.birthDate || ''}</td>
+        <td class="row-actions"></td>
+      `;
+      const actions = tr.querySelector('.row-actions');
+      const btnLoad = document.createElement('button');
+      btnLoad.textContent = 'Load Clinical Data';
+      btnLoad.onclick = () => loadAllForPatient(patient);
+      const btnDelete = document.createElement('button');
+      btnDelete.textContent = 'Delete';
+      btnDelete.onclick = () => deletePatient(patient.id, tr);
+      const btnEdit = document.createElement('button');
+      btnEdit.textContent = 'Edit';
+      btnEdit.onclick = () => updatePatientName(patient, tr);
+      actions.append(btnLoad, btnEdit, btnDelete);
+      tbody.appendChild(tr);
+    }
+
+    async function addPatient(){
+      if (!client) return;
+      const firstname = prompt('First name?');
+      if(!firstname) return;
+      const lastname = prompt('Last name?');
+      if(!lastname) return;
+      const dob = prompt('Birth date? (YYYY-MM-DD)', '1980-01-01');
+      const patient = {
+        resourceType:'Patient',
+        name:[{ given:[firstname], family: lastname }],
+        birthDate: dob
+      };
+      try{
+        const created = await client.create(patient);
+        addPatientRow(created);
+        status(`Added patient ${created.id}`);
+      }catch(err){
+        showError(err.message || String(err));
+      }
+    }
+
+    async function updatePatientName(patient, row){
+      if (!client) return;
+      const firstname = prompt('First name?', safe(()=>patient.name[0].given[0]));
+      if(!firstname) return;
+      const lastname = prompt('Last name?', safe(()=>patient.name[0].family));
+      if(!lastname) return;
+      try{
+        const updated = await client.patch(`Patient/${patient.id}`, [
+          { op:'replace', path:'/name/0/given/0', value: firstname },
+          { op:'replace', path:'/name/0/family', value: lastname }
+        ]);
+        row.parentNode.removeChild(row);
+        addPatientRow(updated);
+        status(`Updated patient ${updated.id}`);
+      }catch(err){
+        showError(err.message || String(err));
+      }
+    }
+
+    async function deletePatient(id, row){
+      if (!client) return;
+      if(!confirm('Delete this patient?')) return;
+      try{
+        await client.delete(`Patient/${id}`);
+        row.parentNode.removeChild(row);
+        status(`Deleted patient ${id}`);
+      }catch(err){
+        showError(err.message || String(err));
+      }
+    }
+
+    // --- LOAD CLINICAL DATA ---
+    async function loadAllForPatient(patient){
+      if (!client) return;
+      selectedPatient = patient;
+      el('#btnAddMockCondition').disabled = false;
+      el('#btnAddMockObservation').disabled = false;
+      clearClinicalTables();
+      status(`Loading clinical data for patient ${patient.id}…`);
+      showError('');
+      try{
+        const [medStmts, medReqs, encounters, conditions, observations] = await Promise.all([
+          client.request(`MedicationStatement?patient=${patient.id}&_count=50`),
+          client.request(`MedicationRequest?patient=${patient.id}&_count=50`),
+          client.request(`Encounter?patient=${patient.id}&_count=50`),
+          client.request(`Condition?patient=${patient.id}&_count=50`),
+          client.request(`Observation?patient=${patient.id}&_sort=-date&_count=100`)
+        ]);
+        renderMeds(medStmts, medReqs);
+        renderEncounters(encounters);
+        renderConditions(conditions);
+        renderObservations(observations);
+        status(`Loaded clinical data for ${patient.id}`);
+      }catch(err){
+        showError(err.message || String(err));
+        status('');
+      }
+    }
+
+    function clearClinicalTables(){
+      el('#medResults').innerHTML='';
+      el('#encResults').innerHTML='';
+      el('#condResults').innerHTML='';
+      el('#obsResults').innerHTML='';
+      // Also clear chart when switching patients
+      renderHemoChart([]);
+    }
+
+    // ---- Renderers ----
+    function renderMeds(stmtBundle, reqBundle){
+      const tbody = el('#medResults');
+      const rows = [];
+
+      const addRow = (r, source) => {
+        const medText = safe(()=>r.medicationCodeableConcept.text,
+          safe(()=>r.medicationCodeableConcept.coding[0].display, '(unknown)'));
+        const date = safe(()=> r.effectiveDateTime || r.effectivePeriod.start || r.authoredOn || r.dateWritten || r.meta.lastUpdated, '');
+        const status = r.status || '';
+        rows.push({date, medText, status, source, _dt: Date.parse(date)});
+      };
+
+      (stmtBundle.entry||[]).forEach(e=> addRow(e.resource, 'MedicationStatement'));
+      (reqBundle.entry||[]).forEach(e=> addRow(e.resource, 'MedicationRequest'));
+
+      rows.sort(byDateDesc).forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.date||''}</td><td>${r.medText}</td><td>${r.status}</td><td>${r.source}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderEncounters(bundle){
+      const tbody = el('#encResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const start = safe(()=>r.period.start,'');
+        const end = safe(()=>r.period.end,'');
+        const cls = safe(()=>r.class.display, safe(()=>r.class.code,''));
+        const type = safe(()=>r.type[0].text, safe(()=>r.type[0].coding[0].display,''));
+        const loc = safe(()=>r.location[0].location.display,'');
+        return {start,end,cls,type,loc,_dt:Date.parse(start)};
+      }).sort(byDateDesc);
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.start}</td><td>${r.end||''}</td><td>${r.cls||''}</td><td>${r.type||''}</td><td>${r.loc||''}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderConditions(bundle){
+      const tbody = el('#condResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const onset = safe(()=>r.onsetDateTime, safe(()=>r.onsetPeriod.start,''));
+        const text = safe(()=>r.code.text, safe(()=>r.code.coding[0].display,'(unknown)'));
+        const clinical = r.clinicalStatus || '';
+        const verification = r.verificationStatus || '';
+        return {onset,text,clinical,verification,_dt:Date.parse(onset)};
+      }).sort(byDateDesc);
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.onset||''}</td><td>${r.text}</td><td>${r.clinical}</td><td>${r.verification}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderObservations(bundle){
+      const tbody = el('#obsResults');
+      const rows = (bundle.entry||[]).map(e=>{
+        const r = e.resource;
+        const date = safe(()=>r.effectiveDateTime, safe(()=>r.effectivePeriod.start, safe(()=>r.issued,'')));
+        const test = safe(()=>r.code.text, safe(()=>r.code.coding[0].display,'(unknown)'));
+        const status = r.status || '';
+        const value = (function(){
+          if (r.valueQuantity) {
+            const v = r.valueQuantity;
+            return `${v.value} ${v.unit || v.code || ''}`.trim();
+          }
+          if (r.valueString) return r.valueString;
+          if (r.valueCodeableConcept) return safe(()=>r.valueCodeableConcept.text, safe(()=>r.valueCodeableConcept.coding[0].display,''));
+          return '';
+        })();
+        return {date,test,value,status,_dt:Date.parse(date)};
+      }).sort(byDateDesc);
+
+      tbody.innerHTML = '';
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.date||''}</td><td>${r.test}</td><td>${r.value||''}</td><td>${r.status}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // Update Hemoglobin chart based on observation rows
+      renderHemoChart(rows);
+    }
+
+    // --- Simple Hemoglobin trend chart ---
+    function renderHemoChart(rows) {
+      const canvas = document.getElementById('hemoChart');
+      if (!canvas) return;
+
+      // Filter for Hemoglobin observations with numeric values
+      const hemoData = rows
+        .filter(r => r.test && r.test.toLowerCase().includes('hemoglobin') && r.value)
+        .map(r => {
+          const numeric = parseFloat(r.value); // "14.2 g/dL" -> 14.2
+          if (isNaN(numeric)) return null;
+          return { date: r.date, value: numeric };
+        })
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // If no Hemoglobin data, clear chart
+      if (!hemoData.length) {
+        if (hemoChartInstance) {
+          hemoChartInstance.destroy();
+          hemoChartInstance = null;
+        }
+        return;
+      }
+
+      const labels = hemoData.map(d => d.date);
+      const data = hemoData.map(d => d.value);
+
+      if (hemoChartInstance) {
+        hemoChartInstance.destroy();
+      }
+
+      hemoChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Hemoglobin (g/dL)',
+            data,
+            tension: 0.2
+          }]
+        }
+      });
+    }
+
+    // --- ADD SOME RECORDS (Mock data for management) ---
+    async function addMockCondition(){
+      if (!client) return;
+      if(!selectedPatient){
+        return alert('Select a patient first by clicking "Load Clinical Data".');
+      }
+      const condition = {
+        resourceType:'Condition',
+        subject:{ reference:`Patient/${selectedPatient.id}` },
+        code:{ coding:[{ system:'http://snomed.info/sct', code:'38341003', display:'Hypertension' }], text:'Hypertension' },
+        clinicalStatus:'active',
+        verificationStatus:'confirmed',
+        onsetDateTime:new Date().toISOString().substring(0,10)
+      };
+      try{
+        const created = await client.create(condition);
+        status(`Added Condition ${created.id}`);
+        const bundle = await client.request(`Condition?patient=${selectedPatient.id}`);
+        renderConditions(bundle);
+      }catch(err){
+        showError(err.message || String(err));
+      }
+    }
+
+    async function addMockObservation(){
+      if (!client) return;
+      if(!selectedPatient){
+        return alert('Select a patient first by clicking "Load Clinical Data".');
+      }
+      const observation = {
+        resourceType:'Observation',
+        status:'final',
+        category:[{
+          coding:[{
+            system:'http://terminology.hl7.org/CodeSystem/observation-category',
+            code:'laboratory',
+            display:'Laboratory'
+          }]
+        }],
+        code:{
+          coding:[{ system:'http://loinc.org', code:'718-7', display:'Hemoglobin [Mass/volume] in Blood' }],
+          text:'Hemoglobin'
+        },
+        subject:{ reference:`Patient/${selectedPatient.id}` },
+        effectiveDateTime: new Date().toISOString(),
+        valueQuantity:{ value: 14.2, unit:'g/dL', system:'http://unitsofmeasure.org', code:'g/dL' }
+      };
+      try{
+        const created = await client.create(observation);
+        status(`Added Observation ${created.id}`);
+        const bundle = await client.request(`Observation?patient=${selectedPatient.id}&_sort=-date&_count=100`);
+        renderObservations(bundle);
+      }catch(err){
+        showError(err.message || String(err));
+      }
+    }
+  </script>
+</body>
+</html>
