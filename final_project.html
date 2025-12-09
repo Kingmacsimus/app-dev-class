@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mock FHIR: Patient Clinical Data Browser</title>
 
-  <!-- SMART-on-FHIR JS client -->
+  <!-- FHIR JS client (no SMART OAuth, direct server access) -->
   <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
 
   <!-- Chart.js (for the simple Hemoglobin trend chart) -->
@@ -27,8 +27,8 @@
 <body>
   <h1>Mock FHIR: Patient Clinical Data Browser</h1>
   <p class="note">
-    Backed by the FHIR server configured via the SMART demo launcher.
-    Some create/update operations can take a few minutes to appear in subsequent searches.
+    Backed by <code>https://r3.smarthealthit.org</code> (STU3). Some create/update operations
+    can take a few minutes to appear in subsequent searches.
   </p>
 
   <div class="controls">
@@ -117,45 +117,24 @@
 
   <script>
     /*
-      This page is intended to be launched via a SMART-on-FHIR demo launcher.
-      It uses FHIR.oauth2.ready() to obtain a client configured with the correct
-      FHIR endpoint and access token.
+      Direct FHIR client against r3.smarthealthit.org (no SMART OAuth).
+      This keeps behavior simple and consistent with your earlier assignments.
     */
 
-    let client = null;           // SMART client (set after oauth2.ready)
-    let selectedPatient = null;  // store currently selected patient resource
-    let hemoChartInstance = null; // Chart.js instance
+    const client = FHIR.client("https://r3.smarthealthit.org"); // STU3 server
 
     const el = sel => document.querySelector(sel);
     const status = msg => el('#status').textContent = msg || '';
     const showError = msg => el('#error').textContent = msg || '';
 
+    let selectedPatient = null;   // store currently selected patient resource
+    let hemoChartInstance = null; // Chart.js instance
+
     function byDateDesc(a, b){ return (b._dt || 0) - (a._dt || 0); }
     function safe(fn, fallback=''){ try { const v = fn(); return v==null ? fallback : v; } catch { return fallback; } }
 
-    // --- SMART on FHIR initialization ---
-    status('Initializing SMART FHIR client…');
-
-    FHIR.oauth2.ready().then(c => {
-      client = c;
-      status('SMART client ready. You can search patients or load clinical data.');
-      wireUi();
-      searchPatients(); // optional initial search
-    }).catch(err => {
-      showError('Failed to initialize SMART client: ' + (err.message || String(err)));
-      status('');
-    });
-
-    function wireUi() {
-      el('#btnSearch').onclick = searchPatients;
-      el('#btnAddPatient').onclick = addPatient;
-      el('#btnAddMockCondition').onclick = addMockCondition;
-      el('#btnAddMockObservation').onclick = addMockObservation;
-    }
-
     // --- PATIENTS ---
     async function searchPatients(){
-      if (!client) return;
       showError('');
       status('Searching patients…');
       const q = (el('#nameQuery').value || '').trim();
@@ -205,7 +184,6 @@
     }
 
     async function addPatient(){
-      if (!client) return;
       const firstname = prompt('First name?');
       if(!firstname) return;
       const lastname = prompt('Last name?');
@@ -226,7 +204,6 @@
     }
 
     async function updatePatientName(patient, row){
-      if (!client) return;
       const firstname = prompt('First name?', safe(()=>patient.name[0].given[0]));
       if(!firstname) return;
       const lastname = prompt('Last name?', safe(()=>patient.name[0].family));
@@ -245,7 +222,6 @@
     }
 
     async function deletePatient(id, row){
-      if (!client) return;
       if(!confirm('Delete this patient?')) return;
       try{
         await client.delete(`Patient/${id}`);
@@ -258,7 +234,6 @@
 
     // --- LOAD CLINICAL DATA ---
     async function loadAllForPatient(patient){
-      if (!client) return;
       selectedPatient = patient;
       el('#btnAddMockCondition').disabled = false;
       el('#btnAddMockObservation').disabled = false;
@@ -289,7 +264,7 @@
       el('#encResults').innerHTML='';
       el('#condResults').innerHTML='';
       el('#obsResults').innerHTML='';
-      // Also clear chart when switching patients
+      // Clear chart as well
       renderHemoChart([]);
     }
 
@@ -428,7 +403,6 @@
 
     // --- ADD SOME RECORDS (Mock data for management) ---
     async function addMockCondition(){
-      if (!client) return;
       if(!selectedPatient){
         return alert('Select a patient first by clicking "Load Clinical Data".');
       }
@@ -451,7 +425,6 @@
     }
 
     async function addMockObservation(){
-      if (!client) return;
       if(!selectedPatient){
         return alert('Select a patient first by clicking "Load Clinical Data".');
       }
@@ -482,6 +455,15 @@
         showError(err.message || String(err));
       }
     }
+
+    // --- Wire up UI and do an initial search ---
+    el('#btnSearch').onclick = searchPatients;
+    el('#btnAddPatient').onclick = addPatient;
+    el('#btnAddMockCondition').onclick = addMockCondition;
+    el('#btnAddMockObservation').onclick = addMockObservation;
+
+    // Optional initial search
+    searchPatients();
   </script>
 </body>
 </html>
